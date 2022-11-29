@@ -1,3 +1,5 @@
+import { ref } from "vue";
+
 export const g = {
-    show_msg: (title: string, content: string)=>{console.log(title + ": " + content)}
+    show_loading: ref(false)
 }
