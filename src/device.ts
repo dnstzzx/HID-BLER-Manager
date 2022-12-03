@@ -16,7 +16,7 @@ interface Response_Info{
 }
 
 export interface Device_Info{
-    battery_level: number,
+    battery_voltage: number,
     slots: {
         id: number,
         mode: number

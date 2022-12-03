@@ -9,7 +9,7 @@ export default{
     data(){
         return{
             info: {
-                battery_level: 0,
+                battery_voltage: 0,
                 slots:[
                     {id: 0, mode: 0},
                     {id: 1, mode: 0}
@@ -28,6 +28,8 @@ export default{
         await this.reflesh()
         g.show_loading.value = false
         this.set_auto_reflesh(true)
+    },unmounted(){
+        this.set_auto_reflesh(false)
     },methods:{
         async reflesh(){
             let info = await this.device.get_device_info()
@@ -62,7 +64,7 @@ export default{
     </div>
 </template>
 <div class="card-item">设备名称：USB HID BLER</div>
-<div class="card-item">当前电量：{{info.battery_level}} %</div>
+<div class="card-item">电池电压：{{info.battery_voltage}} mV</div>
 <div class="card-item" v-for="slot in info.slots">&ensp;接口{{ch_nums[slot.id]}}&ensp;：{{mode_display_names[slot.mode]}}</div>
 
 </el-card>
