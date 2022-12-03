@@ -2,9 +2,12 @@ import 'element-plus/es/components/message/style/css'
 import { ElMessageBox } from 'element-plus'
 
 const msg_request_length = 128;
-const msg_request_report_id = 3;
-const msg_response_report_id = 3;
-const msg_response_length = 128;
+const msg_short_report_id = 3;
+const msg_short_length = 128;
+
+const msg_long_report_id = 4;
+const msg_long_block_length = 512;
+const msg_long_block_data_length = msg_long_block_length - 4;
 
 interface Response_Info{
     success: boolean,
@@ -20,22 +23,28 @@ export interface Device_Info{
     }[]
 }
 
+interface Long_Msg{
+    session: number,
+    block_count: number,
+    transfered_blocks: number,
+    data: Uint8Array
+}
+
 export class Device{
     connected = false
     hid_divece: HIDDevice|undefined = undefined
     on_connected_listeners = [] as (()=>boolean)[]  // returns true if wants cancel the event
     on_disconnected_listeners  = [] as (()=>boolean)[]  // returns true if wants cancel the event
     on_device_output = ()=>{}
+    receiving_long_msgs: Map<number, Long_Msg> = new Map()
     session_listeners: Map<number,(resp:Response_Info)=>void> = new Map()
 
     async connect(vid:number, pid: number){
         let devices = await navigator.hid.requestDevice({filters:[{
             vendorId: vid,
             productId: pid,
-            usagePage: 0xff01,
-            usage: 0x01
+            usagePage: 0xff01
         }]})
-        console.log(devices)
         if(devices.length == 0){
             ElMessageBox.alert('未选择任何有效设备', '连接失败')
             return false
@@ -62,22 +71,51 @@ export class Device{
                 ElMessageBox.alert('连接已断开', '连接断开')
             }
         })
+
+
+        let handle_msg = (buff: DataView)=>{
+            let session = buff.getUint16(0, true)   // session
+            let length = buff.getUint16(2, true)   // length
+            let success = buff.getUint8(4)         // success
+            
+            if(this.session_listeners.has(session)){
+                let s = new TextDecoder().decode(new DataView(buff.buffer, 5 + buff.byteOffset, length))
+                let info: Response_Info = {
+                    success: success != 0,
+                    reason: success == 0 ? s : '',
+                    data: success == 0 ? {} : s.startsWith('{') ? JSON.parse(s): s
+                }
+                this.session_listeners.get(session)!(info)
+            }
+        }
         this.hid_divece.oninputreport= (ev)=>{
-            if(ev.reportId == msg_response_report_id){
+            if(ev.reportId == msg_short_report_id){
+                handle_msg(ev.data)
+            }else if(ev.reportId == msg_long_report_id){
                 let buff = ev.data
                 let session = buff.getUint16(0, true)   // session
-                let length = buff.getUint16(2, true)   // length
-                let success = buff.getUint8(4)         // success
-                
-                if(this.session_listeners.has(session)){
-                    let s = new TextDecoder().decode(new DataView(buff.buffer, 5 + buff.byteOffset, length))
-                    let info: Response_Info = {
-                        success: success != 0,
-                        reason: success == 0 ? s : '',
-                        data: success == 0 ? {} : s.startsWith('{') ? JSON.parse(s): s
+                let blk_count = buff.getUint8(2)   // blk_count
+                let blk_id = buff.getUint8(3)         // blk_id
+                let msg: Long_Msg
+                if(!this.receiving_long_msgs.has(session)){
+                    msg = {
+                        session: session,
+                        block_count: blk_count,
+                        transfered_blocks: (1 << blk_count) - 1,
+                        data: new Uint8Array(blk_count * msg_long_block_data_length)
                     }
-                    this.session_listeners.get(session)!(info)
+                    this.receiving_long_msgs.set(session, msg)
+                }else{
+                    msg = this.receiving_long_msgs.get(session)!
                 }
+                let blk_data = new Uint8Array(buff.buffer, buff.byteOffset + 4)
+                msg.data.set(blk_data, blk_id * msg_long_block_data_length)
+                msg.transfered_blocks -= 1 << blk_id
+                if(msg.transfered_blocks == 0){
+                    this.receiving_long_msgs.delete(session)
+                    handle_msg(new DataView(msg.data.buffer))
+                }
+
             }
         }
         for(let listener of this.on_connected_listeners){
@@ -97,7 +135,6 @@ export class Device{
         view.setUint16(2, session, true);         // session
         let dataview = new Uint8Array(buff, 6, msg_request_length - 6); // data
         let s = typeof(data) == 'string' ? data : JSON.stringify(data)
-        console.log('sending: '+ s)
         let rst = new TextEncoder().encodeInto(s, dataview)
         if(rst.read != s.length || rst.written == undefined){
             return {
@@ -127,7 +164,7 @@ export class Device{
                 }, timeout)
             }
         }) as Promise<Response_Info>
-        await this.hid_divece?.sendReport(msg_request_report_id, buff)
+        await this.hid_divece?.sendReport(msg_short_report_id, buff)
         return await p
     }
 
@@ -142,7 +179,10 @@ export class Device{
 
     async restart(download_mode:boolean){
         this.send_request(2, download_mode ? "1":"0")
+    }
 
+    async get_macros(){
+        return await this.send_request(4, "")
     }
 }
 
