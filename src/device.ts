@@ -1,5 +1,6 @@
 import 'element-plus/es/components/message/style/css'
 import { ElMessageBox } from 'element-plus'
+import type { Mouse_Macro } from './pages/page_macros/macro_types';
 
 const msg_request_length = 128;
 const msg_short_report_id = 3;
@@ -9,10 +10,10 @@ const msg_long_report_id = 4;
 const msg_long_block_length = 512;
 const msg_long_block_data_length = msg_long_block_length - 4;
 
-interface Response_Info{
+interface Response_Info<T extends string | object>{
     success: boolean,
     reason: string,
-    data:   string | object
+    data:   T
 }
 
 export interface Device_Info{
@@ -30,6 +31,11 @@ interface Long_Msg{
     data: Uint8Array
 }
 
+export function handle_error_resp(resp: Response_Info<any>, fail_title="操作失败"){
+    if(!resp.success)   ElMessageBox.alert(resp.reason, fail_title)
+    return resp.success
+}
+
 export class Device{
     connected = false
     hid_divece: HIDDevice|undefined = undefined
@@ -37,7 +43,7 @@ export class Device{
     on_disconnected_listeners  = [] as (()=>boolean)[]  // returns true if wants cancel the event
     on_device_output = ()=>{}
     receiving_long_msgs: Map<number, Long_Msg> = new Map()
-    session_listeners: Map<number,(resp:Response_Info)=>void> = new Map()
+    session_listeners: Map<number,(resp:Response_Info<any>)=>void> = new Map()
 
     async connect(vid:number, pid: number){
         let devices = await navigator.hid.requestDevice({filters:[{
@@ -80,7 +86,7 @@ export class Device{
             
             if(this.session_listeners.has(session)){
                 let s = new TextDecoder().decode(new DataView(buff.buffer, 5 + buff.byteOffset, length))
-                let info: Response_Info = {
+                let info: Response_Info<any> = {
                     success: success != 0,
                     reason: success == 0 ? s : '',
                     data: success == 0 ? {} : s.startsWith('{') ? JSON.parse(s): s
@@ -124,26 +130,40 @@ export class Device{
         return true
     }
 
+    async _snd_msg_short(buff: ArrayBuffer){
+        return await this.hid_divece?.sendReport(msg_short_report_id, buff)
+    }
+
+    async _snd_msg_long(buff: ArrayBuffer, session: number){
+        let blk = new Uint8Array(msg_long_block_length)
+        let blk_cnt = Math.ceil(buff.byteLength/msg_long_block_data_length)
+        for(let i=0;i<blk_cnt;i++){
+            blk[0] = session & 0xFF    // session low
+            blk[1] = session >> 8      // session high
+            blk[2] = blk_cnt           // blk_count
+            blk[3] = i                 // blk_id
+            let blk_data = new Uint8Array(buff, i * msg_long_block_data_length, msg_long_block_data_length)
+            blk.set(blk_data, 4)
+            await this.hid_divece?.sendReport(msg_long_report_id, blk) 
+        }
+    }
+
     async send_request(opcode: number, data: string|object, timeout=0){
-        let buff = new ArrayBuffer(128)
-        let view = new DataView(buff)
         let session = 0
         do{
             session = Math.floor(Math.random() * 0xFFFF)
-        }while(this.session_listeners.has(session))
-        view.setUint16(0, opcode, true);    // opcode
-        view.setUint16(2, session, true);         // session
-        let dataview = new Uint8Array(buff, 6, msg_request_length - 6); // data
+        }while(this.session_listeners.has(session) || session == 0)
         let s = typeof(data) == 'string' ? data : JSON.stringify(data)
-        let rst = new TextEncoder().encodeInto(s, dataview)
-        if(rst.read != s.length || rst.written == undefined){
-            return {
-                success: false,
-                reason: '消息长度超出编码限制', 
-                data: {}
-            } as Response_Info
-        }
-        view.setUint16(4, rst.written, true)    // length
+        let data_length = new TextEncoder().encode(s).length
+        let msg_length = data_length <= msg_short_length - 6 ? msg_short_length : Math.ceil((data_length + 6) / msg_long_block_data_length) * msg_long_block_data_length
+        let buff = new ArrayBuffer(msg_length)
+        let view = new DataView(buff)
+        view.setUint16(0, opcode, true);        // opcode
+        view.setUint16(2, session, true);       // session
+        view.setUint16(4, data_length, true)    // length
+        let dataview = new Uint8Array(buff, 6); // data
+        new TextEncoder().encodeInto(s, dataview)
+
         let p = new Promise((resolve, reject) =>{
             let resolved = false
             this.session_listeners.set(session, (resp)=>{
@@ -163,26 +183,31 @@ export class Device{
                     }
                 }, timeout)
             }
-        }) as Promise<Response_Info>
-        await this.hid_divece?.sendReport(msg_short_report_id, buff)
+        }) as Promise<Response_Info<any>>
+        await msg_length == msg_short_length ? this._snd_msg_short(buff) : this._snd_msg_long(buff, session)
         return await p
     }
 
-    async get_device_info(){
-        let r = await this.send_request(1, "", 3000)
-        if(!r.success){
-            ElMessageBox.alert(r.reason, '操作失败')
-            return undefined
-        }
-        return r.data as Device_Info
+    async get_device_info(timeout=3000){
+        return await this.send_request(1, "", timeout) as Response_Info<Device_Info>
     }
+    
+    async restart(download_mode:boolean, timeout=3000){
+        await this.send_request(2, download_mode ? "1":"0", timeout)
+    }
+    
+    async get_macros(timeout=6000){
+        return await this.send_request(4, "", timeout) as Response_Info<{mouse: Mouse_Macro[]}>
+    }
+    
+    async set_macro(macros: {type:string, mouse: Mouse_Macro}, timeout=5000){
+        return await this.send_request(5, macros, timeout) as Response_Info<string>
+    }
+    
+    async remove_macro(name: string, timeout=3000){
+        return await this.send_request(6, name, timeout) as Response_Info<string>
+    }
+    
 
-    async restart(download_mode:boolean){
-        this.send_request(2, download_mode ? "1":"0")
-    }
-
-    async get_macros(){
-        return await this.send_request(4, "")
-    }
 }
 

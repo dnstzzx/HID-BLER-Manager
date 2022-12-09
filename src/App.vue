@@ -3,16 +3,18 @@
 import Menu from './components/Menu.vue'
 import Header from './components/Header.vue'
 import PageCurrent from './pages/page_current/PageCurrent.vue'
+import PageMacros from './pages/page_macros/PageMacros.vue'
 import PageRestart from './pages/page_restart/PageRestart.vue'
 import { Device } from './device'
 import { g } from './global'
 
 export default{
     components:{
-        Menu,
-        PageCurrent,
-        PageRestart
-    },
+    Menu,
+    PageCurrent,
+    PageRestart,
+    PageMacros
+},
     data(){
         return {
             device: new Device(),
@@ -59,6 +61,7 @@ export default{
         </el-aside>
         <el-main class="main-panel" v-loading="show_loading">
             <PageCurrent v-if="currentPage==0" :device="device"></PageCurrent>
+            <PageMacros  v-if="currentPage==2" :device="device"></PageMacros>
             <PageRestart v-if="currentPage==3" :device="device"></PageRestart>
         </el-main>
         </el-container>

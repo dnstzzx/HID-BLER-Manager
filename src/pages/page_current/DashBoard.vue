@@ -2,7 +2,7 @@
 
 import { g } from '@/global'
 import type { PropType } from 'vue'
-import type { Device, Device_Info } from '../../device'
+import { handle_error_resp, type Device, type Device_Info } from '../../device'
 
 let auto_reflesh_interval_id: undefined|number = undefined
 export default{
@@ -32,11 +32,11 @@ export default{
         this.set_auto_reflesh(false)
     },methods:{
         async reflesh(){
-            let info = await this.device.get_device_info()
-            if(info != undefined){
-                this.info = info
+            let resp = await this.device.get_device_info()
+            if(handle_error_resp(resp)){
+                this.info = resp.data as Device_Info
             }
-            return info
+            return resp
         },set_auto_reflesh(on:boolean){
             if(on && auto_reflesh_interval_id == undefined){
                 auto_reflesh_interval_id = setInterval(async ()=>{
