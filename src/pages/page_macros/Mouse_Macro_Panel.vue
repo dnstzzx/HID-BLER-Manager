@@ -7,6 +7,7 @@ import MouseBtnSelctor from './MouseBtnSelctor.vue';
 const props = defineProps<{
     device: Device
     macro: Mouse_Macro
+    new_created: boolean
 }>()
 
 let origin_name = ""
@@ -23,7 +24,7 @@ const limit_byte = (s:string)=>{
     return s
 }
 onMounted(()=>{
-    origin_name = props.macro.name
+    origin_name = props.new_created ? '' : props.macro.name
 })
 
 /*
@@ -55,9 +56,12 @@ const del_macro = async ()=>{
 }
 
 const set_macro = async ()=>{
+    update_out()
     if(props.macro.name != origin_name){    // 修改过宏名，我们需要先把旧宏删掉再保存新的
-        let resp = await props.device.remove_macro(origin_name)
-        if(!handle_error_resp(resp, "删除旧宏失败"))    return
+        if(origin_name != ''){  // 新创建的宏不需要删除
+            let resp = await props.device.remove_macro(origin_name)
+            if(!handle_error_resp(resp, "删除旧宏失败"))    return
+        }  
         origin_name = props.macro.name
     }
     let resp = await props.device.set_macro({

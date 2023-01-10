@@ -12,6 +12,7 @@ const props = defineProps<{
 
 const macros = reactive<{mouse: Mouse_Macro[]}>({mouse: []})
 const removed_macros = reactive(new Set<Mouse_Macro>())
+const new_macros = reactive(new Set<Mouse_Macro>())
 
 onMounted(async ()=>{
     let resp = await props.device.get_macros()
@@ -39,6 +40,7 @@ const add_macro = ()=>{
         report_duration: 0,
         mouse_output_report: '00'.repeat(8)
     }
+    new_macros.add(new_macro)
     macros.mouse.push(new_macro)
 }
 
@@ -48,7 +50,7 @@ const add_macro = ()=>{
     <div class="center-box fill-parent">
         <div class="panel">
             <template v-for="m of macros.mouse">
-                <Mouse_Macro_Panel v-if="!removed_macros.has(m)" :macro="m" :device="device" 
+                <Mouse_Macro_Panel v-if="!removed_macros.has(m)" :macro="m" :device="device" :new_created="new_macros.has(m)"
                     @delete="removed_macros.add(m)">
                 </Mouse_Macro_Panel>
             </template>
